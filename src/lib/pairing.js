@@ -129,4 +129,43 @@ async function claim({ code, env = 'staging', hotel, room_types, rate_plans, bas
   };
 }
 
-module.exports = { claim, PairingError };
+// Connect a hotel with an API key it already has (no pairing code). There is
+// no webhook secret then, so bookings come only through the 2-minute fetch.
+async function connectWithKey({ propertyId, apiKey, env = 'production', base_url, pms_hotel_id, webhook_secret, timezone }) {
+  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  if (!UUID_RE.test(String(propertyId || ''))) throw new PairingError(400, '--property-id must be the M-Channel property id (uuid)');
+  if (!apiKey || String(apiKey).trim().length < 8) throw new PairingError(400, 'API key missing');
+  if (!['staging', 'production'].includes(env)) throw new PairingError(400, 'env must be staging or production');
+  const baseUrl = (base_url || config.baseUrls[env]).replace(/\/+$/, '');
+  const client = new MChannelClient({ baseUrl, apiKey: String(apiKey).trim() });
+  const res = await client.listProperties();
+  const remote = (res.data || []).find((x) => x.id === propertyId);
+  if (!remote) {
+    const seen = (res.data || []).map((x) => `${x.id} (${x.name})`).join(', ') || 'none';
+    throw new PairingError(404, `This key does not list property ${propertyId} on ${baseUrl}. It lists: ${seen}`);
+  }
+  const rec = {
+    id: remote.id, env, base_url: baseUrl, pms_hotel_id: String(pms_hotel_id || remote.code || remote.id),
+    code: remote.code || null, name: remote.name, status: remote.status || null,
+    ari_source: remote.ari_source || null, rate_source: remote.rate_source || null, currency: remote.currency || null,
+    timezone: timezone || remote.timezone || 'Asia/Kolkata',
+  };
+  await db.query(
+    `INSERT INTO properties (id, env, base_url, pms_hotel_id, code, name, status, ari_source, rate_source, currency,
+        timezone, pairing_mode, api_key_enc, webhook_secret_enc, webhook_token, is_enabled, raw, paired_at, setup_synced_at)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'api_key',$12,$13,$14,true,$15,now(),NULL)
+     ON CONFLICT (id) DO UPDATE SET
+       env = EXCLUDED.env, base_url = EXCLUDED.base_url, pms_hotel_id = EXCLUDED.pms_hotel_id, code = EXCLUDED.code,
+       name = EXCLUDED.name, status = EXCLUDED.status, ari_source = EXCLUDED.ari_source, rate_source = EXCLUDED.rate_source,
+       currency = COALESCE(EXCLUDED.currency, properties.currency), timezone = EXCLUDED.timezone,
+       pairing_mode = 'api_key', api_key_enc = EXCLUDED.api_key_enc, webhook_secret_enc = EXCLUDED.webhook_secret_enc,
+       webhook_token = EXCLUDED.webhook_token, is_enabled = true, raw = EXCLUDED.raw, setup_synced_at = NULL,
+       updated_at = now()`,
+    [rec.id, rec.env, rec.base_url, rec.pms_hotel_id, rec.code, rec.name, rec.status, rec.ari_source, rec.rate_source,
+      rec.currency, rec.timezone, encrypt(String(apiKey).trim()), encrypt(webhook_secret || ''), randomToken(24), remote],
+  );
+  log.info('property connected with an API key', { property_id: rec.id, name: rec.name, env });
+  return rec;
+}
+
+module.exports = { claim, connectWithKey, PairingError };

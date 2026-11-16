@@ -96,3 +96,33 @@ test('three hotels: setup, bookings and pushes stay with their own hotel', async
   assert.deepEqual(H.H002.mock.state.acks.map((a) => a.booking_id), [b2.booking.id], 'ack went to hotel 2 only');
   assert.equal(H.H003.mock.state.acks.length, 0);
 });
+
+test('a hotel connected with an existing API key (no pairing code) gets its bookings fetched', async () => {
+  const mock = createMock();
+  const url = await mock.listen(0);
+  H.KEY = { mock, url };
+  const pid = mock.state.property.id;
+  const post = (body) => fetch(`${url}/__test/booking`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then((r) => r.json());
+  const b = await post({ action: 'create' });
+
+  await assert.rejects(pairing.connectWithKey({ propertyId: pid, apiKey: 'wrong-key-123', env: 'production', base_url: url }), /wrong|unauthorized/i);
+  await assert.rejects(pairing.connectWithKey({ propertyId: '00000000-0000-0000-0000-000000000000', apiKey: mock.state.apiKey, base_url: url }), /does not list/);
+  const rec = await pairing.connectWithKey({ propertyId: pid, apiKey: mock.state.apiKey, env: 'production', base_url: url, pms_hotel_id: 'H004' });
+  assert.equal(rec.pms_hotel_id, 'H004');
+  const row = await props.getById(pid);
+  assert.ok(!row.api_key_enc.includes(mock.state.apiKey), 'key stored encrypted');
+
+  await new Scheduler().runFor(row, ['setup', 'bookings']);
+  for (let i = 0; i < 3; i++) await processAcks();
+  const saved = await one('SELECT status, ack_status FROM bookings WHERE id = $1', [b.booking.id]);
+  assert.deepEqual(saved, { status: 'new', ack_status: 'acked' });
+  assert.equal(mock.state.acks[0].result, 'imported');
+
+  // no webhook secret: the webhook address answers 404 instead of accepting unsigned data
+  const token = row.webhook_token;
+  assert.equal((await fetch(`${appUrl}/mchannel/webhook/${token}`, { method: 'POST', body: '{}' })).status, 404);
+  // and pushes work with the key too
+  await db.query(`SELECT set_availability('H004', 'Standard Room', current_date + 1, current_date + 1, 3)`);
+  await runPushCycle();
+  assert.equal(mock.state.ariRequests.length, 1);
+});

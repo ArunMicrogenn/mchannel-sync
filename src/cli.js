@@ -18,6 +18,9 @@ const HELP = `mchannel-sync ${config.version}  (settings: ${config.envFile}${con
  Hotels
   pair --code MCH-XXXX-XXXX --hotel hotel.json [--env staging|production]
                                        claim a pairing code from M-Channel > Connect a PMS
+  connect --property-id <uuid> [--env production|staging] [--pms-hotel-id H001]
+                                       connect with an API key you already have (asked for, not echoed);
+                                       bookings are then fetched every BOOKING_PULL_MINUTES
   list                                 paired hotels, last booking fetch and last push
   show <hotel>                         room types, rate plans, mapping, last runs, open alerts
   enable <hotel> | disable <hotel>     start / stop syncing a hotel
@@ -63,6 +66,22 @@ function table(rows, cols) {
   for (const r of rows) console.log(cols.map((c, i) => String(r[c] ?? '').padEnd(w[i])).join('  '));
 }
 
+function askHidden(question) {
+  return new Promise((resolve) => {
+    const rl = require('readline').createInterface({ input: process.stdin, output: process.stdout, terminal: true });
+    rl.stdoutMuted = false;
+    rl._writeToOutput = (str) => {
+      if (!rl.stdoutMuted) rl.output.write(str);
+    };
+    rl.question(question, (answer) => {
+      rl.close();
+      process.stdout.write('\n');
+      resolve(answer.trim());
+    });
+    rl.stdoutMuted = true;
+  });
+}
+
 async function need(ref) {
   const p = await props.resolve(ref);
   if (!p) throw new Error(`No paired hotel matches "${ref}". Run: mchannel-sync list`);
@@ -101,6 +120,25 @@ async function main() {
           console.log(`${job}: ${errText(err)}`);
         }
       }
+      break;
+    }
+    case 'connect': {
+      const key = process.env.MCHANNEL_API_KEY || await askHidden('M-Channel API key (X-MChannel-Key): ');
+      const rec = await pairing.connectWithKey({
+        propertyId: arg(args, '--property-id'), apiKey: key, env: arg(args, '--env') || 'production',
+        base_url: arg(args, '--base-url'), pms_hotel_id: arg(args, '--pms-hotel-id'),
+      });
+      print({ connected: rec.name, property_id: rec.id, pms_hotel_id: rec.pms_hotel_id, env: rec.env, base_url: rec.base_url,
+        rooms_from: rec.ari_source, prices_from: rec.rate_source });
+      for (const job of ['setup', 'bookings']) {
+        try {
+          const r = await JOBS[job](await props.getById(rec.id));
+          console.log(`${job}: ok ${r.detail || ''}`);
+        } catch (err) {
+          console.log(`${job}: ${errText(err)}`);
+        }
+      }
+      print(await processAcks({ limit: 500 }));
       break;
     }
     case 'list': {

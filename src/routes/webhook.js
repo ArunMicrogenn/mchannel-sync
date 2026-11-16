@@ -26,7 +26,8 @@ async function propertyForToken(token) {
   const hit = cache.get(token);
   if (hit && hit.until > Date.now()) return hit.value;
   const { rows } = await db.query('SELECT * FROM properties WHERE webhook_token = $1 AND is_enabled', [token]);
-  const value = rows[0] ? { property: rows[0], secret: decrypt(rows[0].webhook_secret_enc) } : null;
+  let value = rows[0] ? { property: rows[0], secret: decrypt(rows[0].webhook_secret_enc) } : null;
+  if (value && !value.secret) value = null; // connected with an API key only: no webhook, bookings are fetched
   cache.set(token, { value, until: Date.now() + 60000 });
   return value;
 }
