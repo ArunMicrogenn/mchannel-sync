@@ -70,8 +70,10 @@ function askHidden(question) {
   return new Promise((resolve) => {
     const rl = require('readline').createInterface({ input: process.stdin, output: process.stdout, terminal: true });
     rl.stdoutMuted = false;
+    // Show one * per character, so a paste is visible without showing the key.
     rl._writeToOutput = (str) => {
       if (!rl.stdoutMuted) rl.output.write(str);
+      else rl.output.write(`\x1B[2K\x1B[200D${question}${'*'.repeat(rl.line.length)}`);
     };
     rl.question(question, (answer) => {
       rl.close();
