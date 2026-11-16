@@ -1,0 +1,22 @@
+{
+  "env": "staging",
+  "hotel": {
+    "pms_hotel_id": "H001",
+    "name": "Hotel Example",
+    "city": "Coimbatore",
+    "country": "IN",
+    "timezone": "Asia/Kolkata",
+    "currency": "INR",
+    "checkin_time": "12:00",
+    "checkout_time": "11:00"
+  },
+  "room_types": [
+    { "pms_ref": "RT-1", "name": "Standard Room", "rooms": 10, "base_occupancy": 2, "max_occupancy": 3 },
+    { "pms_ref": "RT-2", "name": "Deluxe Room", "rooms": 6, "base_occupancy": 2, "max_occupancy": 3 }
+  ],
+  "rate_plans": [
+    { "pms_ref": "RT-1|EP", "pms_room_type_ref": "RT-1", "name": "Room Only", "meal_plan": "room_only", "sell_mode": "per_room" },
+    { "pms_ref": "RT-1|CP", "pms_room_type_ref": "RT-1", "name": "CP", "meal_plan": "breakfast", "sell_mode": "per_person" },
+    { "pms_ref": "RT-2|EP", "pms_room_type_ref": "RT-2", "name": "Room Only", "meal_plan": "room_only", "sell_mode": "per_room" }
+  ]
+}
